@@ -1,64 +1,116 @@
 const http = require("http");
+const fs = require("fs");
 
 const port = process.env.PORT || 3000;
 
-// 🔑 simple key store
-const KEYS = {
-  VIP123: {
-    hwid: null,
-    expiry: Date.now() + 24 * 60 * 60 * 1000
-  }
-};
+// 📁 file database
+const FILE = "keys.json";
+
+// load keys
+let KEYS = {};
+if (fs.existsSync(FILE)) {
+  KEYS = JSON.parse(fs.readFileSync(FILE));
+}
+
+// save keys
+function save() {
+  fs.writeFileSync(FILE, JSON.stringify(KEYS, null, 2));
+}
+
+function send(res, data, type = "application/json") {
+  res.writeHead(200, { "Content-Type": type });
+  res.end(type === "application/json" ? JSON.stringify(data) : data);
+}
 
 const server = http.createServer((req, res) => {
-  // ⭐ Proper URL parse (IMPORTANT)
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const path = url.pathname; // <-- clean path मिलेगा
+  const path = url.pathname;
 
-  // 🔍 Debug (logs में दिखेगा)
-  console.log("PATH:", path);
+  // 🏠 PANEL UI
+  if (path === "/") {
+    return send(res, `
+      <html>
+      <body style="background:#111;color:#fff;font-family:sans-serif;padding:20px">
+      <h2>🔑 Key Panel</h2>
 
-  // ✅ VERIFY ROUTE (exact match)
-  if (path === "/verify" || path === "/verify/") {
-    const key = url.searchParams.get("key");
-    const hwid = url.searchParams.get("hwid");
+      <input id="key" placeholder="Key">
+      <input id="days" placeholder="Days">
+      <button onclick="add()">Add</button>
 
-    if (!KEYS[key]) {
-      return send(res, { status: "INVALID" });
-    }
+      <pre id="list"></pre>
 
-    const data = KEYS[key];
+      <script>
+      async function add(){
+        let k=document.getElementById("key").value;
+        let d=document.getElementById("days").value;
+        await fetch("/add?key="+k+"&days="+d);
+        load();
+      }
+      async function load(){
+        let r=await fetch("/list");
+        let d=await r.json();
+        document.getElementById("list").innerText=JSON.stringify(d,null,2);
+      }
+      load();
+      </script>
+      </body>
+      </html>
+    `, "text/html");
+  }
 
-    if (data.hwid && data.hwid !== hwid) {
-      return send(res, { status: "WRONG_DEVICE" });
-    }
+  // ➕ ADD KEY
+  if (path === "/add") {
+    let key = url.searchParams.get("key");
+    let days = parseInt(url.searchParams.get("days") || "1");
 
-    if (Date.now() > data.expiry) {
+    if (!key) return send(res, { error: "key required" });
+
+    key = key.trim().toUpperCase();
+
+    KEYS[key] = {
+      expiry: Date.now() + days * 24 * 60 * 60 * 1000
+    };
+
+    save();
+
+    return send(res, { status: "ADDED", key, days });
+  }
+
+  // 🔍 VERIFY (app use)
+  if (path === "/verify") {
+    let key = url.searchParams.get("key");
+    if (!key) return send(res, { status: "INVALID" });
+
+    key = key.trim().toUpperCase();
+
+    if (!KEYS[key]) return send(res, { status: "INVALID" });
+
+    if (Date.now() > KEYS[key].expiry) {
       return send(res, { status: "EXPIRED" });
     }
 
     return send(res, {
       status: "SUCCESS",
-      timeLeft: "24h",
-      used: 1,
-      max: 1
+      access: "GRANTED"
     });
   }
 
-  // 🏠 ROOT (test के लिए)
-  if (path === "/") {
-    return send(res, { status: "SERVER_OK" });
+  // 📜 LIST
+  if (path === "/list") {
+    return send(res, KEYS);
   }
 
-  // ❌ fallback
-  res.writeHead(404, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ error: "Not Found", path }));
-});
+  // ❌ DELETE
+  if (path === "/delete") {
+    let key = url.searchParams.get("key");
+    key = key?.trim().toUpperCase();
+    delete KEYS[key];
+    save();
+    return send(res, { status: "DELETED" });
+  }
 
-function send(res, obj) {
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(obj));
-}
+  send(res, { error: "Not Found" });
+});
 
 server.listen(port, "0.0.0.0", () => {
   console.log("Server running...");
