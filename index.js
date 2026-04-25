@@ -2,17 +2,13 @@ const http = require("http");
 const fs = require("fs");
 
 const port = process.env.PORT || 3000;
-
-// 📁 file database
 const FILE = "keys.json";
 
-// load keys
 let KEYS = {};
 if (fs.existsSync(FILE)) {
   KEYS = JSON.parse(fs.readFileSync(FILE));
 }
 
-// save keys
 function save() {
   fs.writeFileSync(FILE, JSON.stringify(KEYS, null, 2));
 }
@@ -26,39 +22,73 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const path = url.pathname;
 
-  // 🏠 PANEL UI
+  // 🌐 MODERN UI PANEL
   if (path === "/") {
     return send(res, `
-      <html>
-      <body style="background:#111;color:#fff;font-family:sans-serif;padding:20px">
-      <h2>🔑 Key Panel</h2>
+<!DOCTYPE html>
+<html>
+<head>
+<title>Key Panel</title>
+<style>
+body{background:#0f172a;color:#fff;font-family:sans-serif;padding:20px}
+.card{background:#1e293b;padding:20px;border-radius:10px}
+input,button{padding:10px;margin:5px;border:none;border-radius:5px}
+input{background:#334155;color:#fff}
+button{background:#22c55e;color:#000;cursor:pointer}
+.delete{background:#ef4444}
+</style>
+</head>
+<body>
 
-      <input id="key" placeholder="Key">
-      <input id="days" placeholder="Days">
-      <button onclick="add()">Add</button>
+<h2>🔑 Key Management Panel</h2>
 
-      <pre id="list"></pre>
+<div class="card">
+<input id="key" placeholder="Enter key">
+<input id="days" placeholder="Days (e.g 60)">
+<button onclick="add()">Add Key</button>
+</div>
 
-      <script>
-      async function add(){
-        let k=document.getElementById("key").value;
-        let d=document.getElementById("days").value;
-        await fetch("/add?key="+k+"&days="+d);
-        load();
-      }
-      async function load(){
-        let r=await fetch("/list");
-        let d=await r.json();
-        document.getElementById("list").innerText=JSON.stringify(d,null,2);
-      }
-      load();
-      </script>
-      </body>
-      </html>
+<h3>📜 Keys List</h3>
+<div id="list"></div>
+
+<script>
+async function add(){
+  let k=document.getElementById("key").value;
+  let d=document.getElementById("days").value;
+  await fetch("/add?key="+k+"&days="+d);
+  load();
+}
+
+async function del(key){
+  await fetch("/delete?key="+key);
+  load();
+}
+
+async function load(){
+  let res=await fetch("/list");
+  let data=await res.json();
+
+  let html="";
+  for(let k in data){
+    html+=\`
+    <div class="card">
+      <b>\${k}</b><br>
+      Expiry: \${new Date(data[k].expiry).toLocaleString()}<br>
+      <button class="delete" onclick="del('\${k}')">Delete</button>
+    </div>
+    \`;
+  }
+  document.getElementById("list").innerHTML=html;
+}
+load();
+</script>
+
+</body>
+</html>
     `, "text/html");
   }
 
-  // ➕ ADD KEY
+  // ➕ ADD
   if (path === "/add") {
     let key = url.searchParams.get("key");
     let days = parseInt(url.searchParams.get("days") || "1");
@@ -72,11 +102,10 @@ const server = http.createServer((req, res) => {
     };
 
     save();
-
-    return send(res, { status: "ADDED", key, days });
+    return send(res, { status: "ADDED" });
   }
 
-  // 🔍 VERIFY (app use)
+  // 🔍 VERIFY
   if (path === "/verify") {
     let key = url.searchParams.get("key");
     if (!key) return send(res, { status: "INVALID" });
